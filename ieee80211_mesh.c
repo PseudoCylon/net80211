@@ -1042,8 +1042,6 @@ mesh_transmit_to_gate(struct ieee80211vap *vap, struct mbuf *m,
 	struct ifnet *ifp = vap->iv_ifp;
 	struct ieee80211_node *ni;
 
-	IEEE80211_TX_UNLOCK_ASSERT(vap->iv_ic);
-
 	ni = ieee80211_mesh_find_txnode(vap, rt_gate->rt_dest);
 	if (ni == NULL) {
 		ifp->if_oerrors++;
@@ -1077,8 +1075,6 @@ ieee80211_mesh_forward_to_gates(struct ieee80211vap *vap,
 	struct ieee80211_mesh_route *rt_gate;
 	struct ieee80211_mesh_gate_route *gr = NULL, *gr_next;
 	struct mbuf *m, *mcopy, *next;
-
-	IEEE80211_TX_UNLOCK_ASSERT(ic);
 
 	KASSERT( rt_dest->rt_flags == IEEE80211_MESHRT_FLAGS_DISCOVER,
 	    ("Route is not marked with IEEE80211_MESHRT_FLAGS_DISCOVER"));
@@ -1157,9 +1153,6 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 	struct ieee80211_node *ni;
 	int err;
 
-	/* This is called from the RX path - don't hold this lock */
-	IEEE80211_TX_UNLOCK_ASSERT(ic);
-
 	/*
 	 * mesh ttl of 1 means we are the last one receving it,
 	 * according to amendment we decrement and then check if
@@ -1232,19 +1225,7 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 	/* XXX do we know m_nextpkt is NULL? */
 	mcopy->m_pkthdr.rcvif = (void *) ni;
 
-	/*
-	 * XXX this bypasses all of the VAP TX handling; it passes frames
-	 * directly to the parent interface.
-	 *
-	 * Because of this, there's no TX lock being held as there's no
-	 * encaps state being used.
-	 *
-	 * Doing a direct parent transmit may not be the correct thing
-	 * to do here; we'll have to re-think this soon.
-	 */
-	IEEE80211_TX_LOCK(ic);
 	err = ieee80211_parent_transmit(ic, mcopy);
-	IEEE80211_TX_UNLOCK(ic);
 	if (err != 0) {
 		/* NB: IFQ_HANDOFF reclaims mbuf */
 		ieee80211_free_node(ni);
@@ -1382,9 +1363,6 @@ mesh_recv_indiv_data_to_fwrd(struct ieee80211vap *vap, struct mbuf *m,
 	struct ieee80211_mesh_state *ms = vap->iv_mesh;
 	struct ieee80211_mesh_route *rt_meshda, *rt_meshsa;
 
-	/* This is called from the RX path - don't hold this lock */
-	IEEE80211_TX_UNLOCK_ASSERT(vap->iv_ic);
-
 	qwh = (struct ieee80211_qosframe_addr4 *)wh;
 
 	/*
@@ -1440,9 +1418,6 @@ mesh_recv_indiv_data_to_me(struct ieee80211vap *vap, struct mbuf *m,
 	struct ieee80211_mesh_state *ms = vap->iv_mesh;
 	struct ieee80211_mesh_route *rt;
 	int ae;
-
-	/* This is called from the RX path - don't hold this lock */
-	IEEE80211_TX_UNLOCK_ASSERT(vap->iv_ic);
 
 	qwh = (struct ieee80211_qosframe_addr4 *)wh;
 	mc10 = (const struct ieee80211_meshcntl_ae10 *)mc;
@@ -1506,9 +1481,6 @@ mesh_recv_group_data(struct ieee80211vap *vap, struct mbuf *m,
 #define	MC01(mc)	((const struct ieee80211_meshcntl_ae01 *)mc)
 	struct ieee80211_mesh_state *ms = vap->iv_mesh;
 
-	/* This is called from the RX path - don't hold this lock */
-	IEEE80211_TX_UNLOCK_ASSERT(vap->iv_ic);
-
 	mesh_forward(vap, m, mc);
 
 	if(mc->mc_ttl > 0) {
@@ -1553,9 +1525,6 @@ mesh_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 
 	need_tap = 1;			/* mbuf need to be tapped. */
 	type = -1;			/* undefined */
-
-	/* This is called from the RX path - don't hold this lock */
-	IEEE80211_TX_UNLOCK_ASSERT(ic);
 
 	if (m->m_pkthdr.len < sizeof(struct ieee80211_frame_min)) {
 		IEEE80211_DISCARD_MAC(vap, IEEE80211_MSG_ANY,
@@ -2676,7 +2645,6 @@ mesh_send_action(struct ieee80211_node *ni,
     struct mbuf *m)
 {
 	struct ieee80211vap *vap = ni->ni_vap;
-	struct ieee80211com *ic = ni->ni_ic;
 	struct ieee80211_bpf_params params;
 	struct ieee80211_frame *wh;
 	int ret;
@@ -2698,7 +2666,6 @@ mesh_send_action(struct ieee80211_node *ni,
 		return ENOMEM;
 	}
 
-	IEEE80211_TX_LOCK(ic);
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(ni, m,
 	     IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_ACTION,
@@ -2717,7 +2684,6 @@ mesh_send_action(struct ieee80211_node *ni,
 	IEEE80211_NODE_STAT(ni, tx_mgmt);
 
 	ret = ieee80211_raw_output(vap, ni, m, &params);
-	IEEE80211_TX_UNLOCK(ic);
 	return (ret);
 }
 

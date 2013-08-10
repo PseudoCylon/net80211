@@ -656,8 +656,6 @@ hwmp_send_action(struct ieee80211vap *vap,
 		return ENOMEM;
 	}
 
-	IEEE80211_TX_LOCK(ic);
-
 	ieee80211_send_setup(ni, m,
 	    IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_ACTION,
 	    IEEE80211_NONQOS_TID, vap->iv_myaddr, da, vap->iv_myaddr);
@@ -674,7 +672,7 @@ hwmp_send_action(struct ieee80211vap *vap,
 		params.ibp_try0 = ni->ni_txparms->maxretry;
 	params.ibp_power = ni->ni_txpower;
 	ret = ieee80211_raw_output(vap, ni, m, &params);
-	IEEE80211_TX_UNLOCK(ic);
+
 	return (ret);
 }
 

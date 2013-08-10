@@ -2392,9 +2392,7 @@ ieee80211_send_bar(struct ieee80211_node *ni,
 	 * ic_raw_xmit will free the node reference
 	 * regardless of queue/TX success or failure.
 	 */
-	IEEE80211_TX_LOCK(ic);
 	ret = ieee80211_raw_output(vap, ni, m, NULL);
-	IEEE80211_TX_UNLOCK(ic);
 	if (ret != 0) {
 		IEEE80211_NOTE(vap, IEEE80211_MSG_DEBUG | IEEE80211_MSG_11N,
 		    ni, "send BAR: failed: (ret = %d)\n",
