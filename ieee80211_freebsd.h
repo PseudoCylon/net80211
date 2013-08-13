@@ -138,6 +138,74 @@ typedef struct mtx ieee80211_ageq_lock_t;
 #define	IEEE80211_AGEQ_UNLOCK(_aq)	mtx_unlock(&(_aq)->aq_lock)
 
 /*
+ * Tx queue definitionse
+ */
+/*
+ * IFQ_HANDOFF_ADJ() minus calling if_start()
+ * TODO fragment
+ */
+#define IEEE80211_ENQUEUE(ifp, m, e) do {				\
+	IFQ_ENQUEUE(&(ifp)->if_snd, (m), (e));				\
+	if ((e) == 0) {							\
+		ifp->if_obytes += m->m_pkthdr.len;			\
+		if (m->m_flags & M_MCAST)				\
+			ifp->if_omcasts++;				\
+	}								\
+} while (0)
+
+#define	IEEE80211_MGT_ENQUEUE(ifp, m) do {				\
+	struct ifaltq *ifq = &(ifp)->if_snd;				\
+	IF_LOCK(ifq);							\
+	(m)->m_nextpkt = NULL;						\
+	if (ifq->ifq_drv_tail == NULL) 					\
+		ifq->ifq_drv_head = m;					\
+	else								\
+		ifq->ifq_drv_tail->m_nextpkt = m;			\
+	ifq->ifq_drv_tail = m;						\
+	ifq->ifq_drv_len++;						\
+	IF_UNLOCK(ifq);							\
+} while (0)
+
+#define	IEEE80211_DEQUEUE(ifq, m) do {					\
+	(m) = (ifq)->ifq_drv_head;					\
+	if ((m)) {							\
+		if (((ifq)->ifq_drv_head = (m)->m_nextpkt) == NULL)	\
+			(ifq)->ifq_drv_tail = NULL;			\
+		(m)->m_nextpkt = NULL;					\
+		(ifq)->ifq_drv_len--;					\
+	} else								\
+		IFQ_DEQUEUE_NOLOCK(ifq, m);				\
+} while (0)
+
+#define	IEEE80211_M_FREEM(ifq, m) do {						\
+	struct mbuf *m0, *head, *tail;						\
+	IFQ_LOCK((ifq));							\
+	head = tail = NULL;							\
+	for (;;) {								\
+		IFQ_DEQUEUE_NOLOCK((ifq), m0);					\
+		if (m0 == (m) | m0 == NULL)					\
+			break;							\
+		if (head == NULL) {						\
+			head = tail = m0;					\
+			continue;						\
+		}								\
+		tail->m_nextpkt = m0;						\
+		tail = m0;							\
+	}									\
+	m_freem((m));								\
+	for (;;) {								\
+		if (head == tail) {						\
+			_IF_PREPEND((ifq), head);				\
+			break;							\
+		}								\
+		for (m0 = head; m0->m_nextpkt != tail; m0 = m0->m_nextpkt);	\
+		_IF_PREPEND((ifq), m0->m_nextpkt);				\
+		tail = m0;							\
+	}									\
+	IFQ_UNLOCK((ifq));							\
+} while (0)
+
+/*
  * 802.1x MAC ACL database locking definitions.
  */
 typedef struct mtx acl_lock_t;

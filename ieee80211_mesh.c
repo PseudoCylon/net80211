@@ -1219,6 +1219,10 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 	KASSERT(mccopy->mc_ttl > 0, ("%s called with wrong ttl", __func__));
 	mccopy->mc_ttl--;
 
+	IEEE80211_ENQUEUE(ifp, mcopy, err);
+	if (err != 0)
+		return;
+
 	/* XXX calculate priority so drivers can find the tx queue */
 	M_WME_SETAC(mcopy, WME_AC_BE);
 
@@ -2665,6 +2669,8 @@ mesh_send_action(struct ieee80211_node *ni,
 		ieee80211_free_node(ni);
 		return ENOMEM;
 	}
+
+	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(ni, m,

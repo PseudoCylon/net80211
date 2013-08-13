@@ -2264,7 +2264,7 @@ ieee80211_recv_pspoll(struct ieee80211_node *ni, struct mbuf *m0)
 	struct ieee80211_frame_min *wh;
 	struct mbuf *m;
 	uint16_t aid;
-	int qlen;
+	int qlen, err;
 
 	wh = mtod(m0, struct ieee80211_frame_min *);
 	if (ni->ni_associd == 0) {
@@ -2331,8 +2331,12 @@ ieee80211_recv_pspoll(struct ieee80211_node *ni, struct mbuf *m0)
 	 * call ieee80211_vap_transmit().
 	 */
 	if (m->m_flags & M_ENCAP) {
-		if (ieee80211_parent_transmit(ic, m) != 0)
-			ieee80211_free_node(ni);
+		IEEE80211_ENQUEUE(vap->iv_ifp, m, err);
+		if (err == 0)
+			err = ieee80211_parent_transmit(ic, m);
+		if (err == 0)
+			return;
+		ieee80211_free_node(ni);
 	} else {
 		(void) ieee80211_vap_transmit(vap, m);
 	}

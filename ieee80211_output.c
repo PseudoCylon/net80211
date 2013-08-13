@@ -377,6 +377,72 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 }
 
 /*
+ * Here is the trick dumb people cannot understand,
+ * enqueue and process packets without dequque.
+ */
+static int
+ieee80211_transmit_pkt(struct ifnet *ifp, struct mbuf *m)
+{
+	struct ieee80211vap *vap = ifp->if_softc;
+	struct ieee80211com *ic = vap->iv_ic;
+	struct ifnet *parent = ic->ic_ifp;
+
+	/* NB: parent must be up and running */
+	if (!IFNET_IS_UP_RUNNING(parent)) {
+		IEEE80211_DPRINTF(vap, IEEE80211_MSG_OUTPUT,
+		    "%s: ignore queue, parent %s not up+running\n",
+		    __func__, parent->if_xname);
+		/* XXX stat */
+		return (ENXIO);
+	}
+	if (vap->iv_state == IEEE80211_S_SLEEP) {
+		/*
+		 * In power save, wakeup device for transmit.
+		 */
+		ieee80211_new_state(vap, IEEE80211_S_RUN, 0);
+		return (ENXIO);
+	}
+	/*
+	 * No data frames go out unless we're running.
+	 * Note in particular this covers CAC and CSA
+	 * states (though maybe we should check muting
+	 * for CSA).
+	 */
+	if (vap->iv_state != IEEE80211_S_RUN) {
+		IEEE80211_LOCK(ic);
+		/* re-check under the com lock to avoid races */
+		if (vap->iv_state != IEEE80211_S_RUN) {
+			IEEE80211_DPRINTF(vap, IEEE80211_MSG_OUTPUT,
+			    "%s: ignore queue, in %s state\n",
+			    __func__, ieee80211_state_name[vap->iv_state]);
+			vap->iv_stats.is_tx_badstate++;
+			IEEE80211_UNLOCK(ic);
+			IFQ_LOCK(&ifp->if_snd);
+			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+			IFQ_UNLOCK(&ifp->if_snd);
+			return (ENXIO);
+		}
+		IEEE80211_UNLOCK(ic);
+	}
+
+	m->m_flags &= ~(M_80211_TX - M_PWR_SAV - M_MORE_DATA);
+
+	return (ieee80211_start_pkt(vap, m));
+}
+
+int
+ieee80211_transmit(struct ifnet *ifp, struct mbuf *m)
+{
+	int err;
+
+	IEEE80211_ENQUEUE(ifp, m, err);
+	if (err == 0)
+		err = ieee80211_transmit_pkt(ifp, m);
+
+	return (err);
+}
+
+/*
  * Start method for vap's.  All packets from the stack come
  * through here.  We handle common processing of the packets
  * before dispatching them to the underlying device.
@@ -569,6 +635,8 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	/* XXX assumes an 802.3 frame */
 	if (ieee80211_classify(ni, m))
 		senderr(EIO);		/* XXX */
+
+	IEEE80211_MGT_ENQUEUE(ifp, m);
 
 	ifp->if_opackets++;
 	IEEE80211_NODE_STAT(ni, tx_data);
@@ -826,6 +894,8 @@ ieee80211_send_nulldata(struct ieee80211_node *ni)
 		ieee80211_free_node(ni);
 		return ENOMEM;
 	}
+
+	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);		/* NB: a little lie */
 	if (ni->ni_flags & IEEE80211_NODE_QOS) {
@@ -2016,6 +2086,8 @@ ieee80211_send_probereq(struct ieee80211_node *ni,
 		return ENOMEM;
 	}
 
+	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(ni, m,
 	     IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_PROBE_REQ,
@@ -2402,6 +2474,8 @@ ieee80211_send_mgmt(struct ieee80211_node *ni, int type, int arg)
 		/* NOTREACHED */
 	}
 
+	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+
 	/* NB: force non-ProbeResp frames to the highest queue */
 	params.ibp_pri = WME_AC_VO;
 	params.ibp_rate0 = bss->ni_txparms->mgmtrate;
@@ -2626,6 +2700,8 @@ ieee80211_send_proberesp(struct ieee80211vap *vap,
 
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_NOWAIT);
 	KASSERT(m != NULL, ("no room for header"));
+
+	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(bss, m,

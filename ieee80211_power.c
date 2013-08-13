@@ -419,6 +419,7 @@ pwrsave_flushq(struct ieee80211_node *ni)
 	struct ifnet *parent, *ifp;
 	struct mbuf *parent_q = NULL, *ifp_q = NULL;
 	struct mbuf *m;
+	int err;
 
 	IEEE80211_NOTE(vap, IEEE80211_MSG_POWER, ni,
 	    "flush ps queue, %u packets queued", psq->psq_len);
@@ -455,6 +456,9 @@ pwrsave_flushq(struct ieee80211_node *ni)
 	if (parent != NULL) {
 		while (parent_q != NULL) {
 			m = parent_q;
+			IEEE80211_ENQUEUE(vap->iv_ifp, m, err);
+			if (err !=0 )
+				continue;
 			parent_q = m->m_nextpkt;
 			m->m_nextpkt = NULL;
 			/* must be encapsulated */
