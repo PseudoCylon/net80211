@@ -236,7 +236,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 			return (ENOBUFS);
 		}
 	}
-	error = ieee80211_parent_xmitpkt(ic, m);
+	error = ieee80211_parent_transmit(ic, m);
 
 	/*
 	 * Unlock at this point - no need to hold it across
@@ -396,16 +396,14 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
  * Start method for vap's.  All packets from the stack come
  * through here.  We handle common processing of the packets
  * before dispatching them to the underlying device.
- *
- * if_transmit() requires that the mbuf be consumed by this call
- * regardless of the return condition.
  */
-int
-ieee80211_vap_transmit(struct ifnet *ifp, struct mbuf *m)
+void
+ieee80211_start(struct ifnet *ifp)
 {
 	struct ieee80211vap *vap = ifp->if_softc;
 	struct ieee80211com *ic = vap->iv_ic;
 	struct ifnet *parent = ic->ic_ifp;
+	struct mbuf *m;
 
 	/* NB: parent must be up and running */
 	if (!IFNET_IS_UP_RUNNING(parent)) {
@@ -413,8 +411,7 @@ ieee80211_vap_transmit(struct ifnet *ifp, struct mbuf *m)
 		    "%s: ignore queue, parent %s not up+running\n",
 		    __func__, parent->if_xname);
 		/* XXX stat */
-		m_freem(m);
-		return (EINVAL);
+		return;
 	}
 	if (vap->iv_state == IEEE80211_S_SLEEP) {
 		/*
@@ -422,7 +419,7 @@ ieee80211_vap_transmit(struct ifnet *ifp, struct mbuf *m)
 		 */
 		ieee80211_new_state(vap, IEEE80211_S_RUN, 0);
 		m_freem(m);
-		return (0);
+		return;
 	}
 	/*
 	 * No data frames go out unless we're running.
@@ -439,36 +436,35 @@ ieee80211_vap_transmit(struct ifnet *ifp, struct mbuf *m)
 			    __func__, ieee80211_state_name[vap->iv_state]);
 			vap->iv_stats.is_tx_badstate++;
 			IEEE80211_UNLOCK(ic);
+			IFQ_LOCK(&ifp->if_snd);
 			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
+			IFQ_UNLOCK(&ifp->if_snd);
 			m_freem(m);
-			return (EINVAL);
+			return;
 		}
 		IEEE80211_UNLOCK(ic);
 	}
 
-	/*
-	 * Sanitize mbuf flags for net80211 use.  We cannot
-	 * clear M_PWR_SAV or M_MORE_DATA because these may
-	 * be set for frames that are re-submitted from the
-	 * power save queue.
-	 *
-	 * NB: This must be done before ieee80211_classify as
-	 *     it marks EAPOL in frames with M_EAPOL.
-	 */
-	m->m_flags &= ~(M_80211_TX - M_PWR_SAV - M_MORE_DATA);
-
-	/*
-	 * Bump to the packet transmission path.
-	 * The mbuf will be consumed here.
-	 */
-	return (ieee80211_start_pkt(vap, m));
-}
-
-void
-ieee80211_vap_qflush(struct ifnet *ifp)
-{
-
-	/* Empty for now */
+	for (;;) {
+		IFQ_DEQUEUE(&ifp->if_snd, m);
+		if (m == NULL)
+			break;
+		/*
+		 * Sanitize mbuf flags for net80211 use.  We cannot
+		 * clear M_PWR_SAV or M_MORE_DATA because these may
+		 * be set for frames that are re-submitted from the
+		 * power save queue.
+		 *
+		 * NB: This must be done before ieee80211_classify as
+		 *     it marks EAPOL in frames with M_EAPOL.
+		 */
+		m->m_flags &= ~(M_80211_TX - M_PWR_SAV - M_MORE_DATA);
+		/*
+		 * Bump to the packet transmission path.
+		 */
+		(void) ieee80211_start_pkt(vap, m);
+		/* mbuf is consumed here */
+	}
 }
 
 /*
@@ -506,7 +502,9 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	int error;
 	int ret;
 
+	IFQ_LOCK(&ifp->if_snd);
 	if (ifp->if_drv_flags & IFF_DRV_OACTIVE) {
+		IFQ_UNLOCK(&ifp->if_snd);
 		/*
 		 * Short-circuit requests if the vap is marked OACTIVE
 		 * as this can happen because a packet came down through
@@ -517,6 +515,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 		 */
 		senderr(ENETDOWN);
 	}
+	IFQ_UNLOCK(&ifp->if_snd);
 	vap = ifp->if_softc;
 	ic = vap->iv_ic;
 	/*
