@@ -177,32 +177,12 @@ typedef struct mtx ieee80211_ageq_lock_t;
 		IFQ_DEQUEUE_NOLOCK(ifq, m);				\
 } while (0)
 
-#define	IEEE80211_M_FREEM(ifq, m) do {						\
-	struct mbuf *m0, *head, *tail;						\
-	IFQ_LOCK((ifq));							\
-	head = tail = NULL;							\
-	for (;;) {								\
-		IFQ_DEQUEUE_NOLOCK((ifq), m0);					\
-		if (m0 == (m) | m0 == NULL)					\
-			break;							\
-		if (head == NULL) {						\
-			head = tail = m0;					\
-			continue;						\
-		}								\
-		tail->m_nextpkt = m0;						\
-		tail = m0;							\
-	}									\
-	m_freem((m));								\
-	for (;;) {								\
-		if (head == tail) {						\
-			_IF_PREPEND((ifq), head);				\
-			break;							\
-		}								\
-		for (m0 = head; m0->m_nextpkt != tail; m0 = m0->m_nextpkt);	\
-		_IF_PREPEND((ifq), m0->m_nextpkt);				\
-		tail = m0;							\
-	}									\
-	IFQ_UNLOCK((ifq));							\
+#define	IEEE80211_M_DOOM	0xff	/* token for freeing mbuf */
+#define	IEEE80211_M_DOOMED	(void *)IEEE80211_M_DOOM
+#define	IEEE80211_M_FREEM(m, n) do {					\
+	(m)->m_pkthdr.rcvif = IEEE80211_M_DOOMED;			\
+	if ((n) != NULL)						\
+		ieee80211_free_node((n));				\
 } while (0)
 
 /*
