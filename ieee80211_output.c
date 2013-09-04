@@ -417,7 +417,6 @@ ieee80211_start(struct ifnet *ifp)
 		 * In power save, wakeup device for transmit.
 		 */
 		ieee80211_new_state(vap, IEEE80211_S_RUN, 0);
-		m_freem(m);
 		return;
 	}
 	/*
@@ -438,7 +437,6 @@ ieee80211_start(struct ifnet *ifp)
 			IFQ_LOCK(&ifp->if_snd);
 			ifp->if_drv_flags |= IFF_DRV_OACTIVE;
 			IFQ_UNLOCK(&ifp->if_snd);
-			m_freem(m);
 			return;
 		}
 		IEEE80211_UNLOCK(ic);
