@@ -272,11 +272,14 @@ struct mbuf *ieee80211_getmgtframe(uint8_t **frm, int headroom, int pktlen);
 #define	M_FRAG		M_PROTO9		/* frame fragmentation */
 #define	M_FIRSTFRAG	M_PROTO10		/* first frame fragment */
 #define	M_LASTFRAG	M_PROTO11		/* last frame fragment */
+#define	M_TX_GO		M_PROTO12		/* go for Tx */
+#else
+#define	M_TX_GO		0x00800000		/* go for Tx */
 #endif
 
 #define	M_80211_TX \
 	(M_ENCAP|M_EAPOL|M_PWR_SAV|M_MORE_DATA|M_FF|M_TXCB| \
-	 M_AMPDU_MPDU|M_FRAG|M_FIRSTFRAG|M_LASTFRAG)
+	 M_AMPDU_MPDU|M_FRAG|M_FIRSTFRAG|M_LASTFRAG|M_TX_GO)
 
 /* rx path usage */
 #define	M_AMPDU		M_PROTO1		/* A-MPDU subframe */
