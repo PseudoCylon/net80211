@@ -145,11 +145,11 @@ typedef struct mtx ieee80211_ageq_lock_t;
  * TODO fragment
  */
 #define IEEE80211_ENQUEUE(ifp, m, e) do {				\
-	IFQ_ENQUEUE(&(ifp)->if_snd, (m), (e));				\
+	IFQ_ENQUEUE(&(ifp)->if_snd, m, e);				\
 	if ((e) == 0) {							\
-		ifp->if_obytes += m->m_pkthdr.len;			\
-		if (m->m_flags & M_MCAST)				\
-			ifp->if_omcasts++;				\
+		(ifp)->if_obytes += (m)->m_pkthdr.len;			\
+		if ((m)->m_flags & M_MCAST)				\
+			(ifp)->if_omcasts++;				\
 	}								\
 } while (0)
 
@@ -157,11 +157,11 @@ typedef struct mtx ieee80211_ageq_lock_t;
 	struct ifaltq *ifq = &(ifp)->if_snd;				\
 	IF_LOCK(ifq);							\
 	(m)->m_nextpkt = NULL;						\
-	if (ifq->ifq_drv_tail == NULL) 					\
-		ifq->ifq_drv_head = m;					\
+	if (ifq->ifq_drv_tail == NULL)					\
+		ifq->ifq_drv_head = (m);				\
 	else								\
-		ifq->ifq_drv_tail->m_nextpkt = m;			\
-	ifq->ifq_drv_tail = m;						\
+		ifq->ifq_drv_tail->m_nextpkt = (m);			\
+	ifq->ifq_drv_tail = (m);					\
 	ifq->ifq_drv_len++;						\
 	IF_UNLOCK(ifq);							\
 } while (0)
