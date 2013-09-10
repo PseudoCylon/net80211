@@ -168,19 +168,25 @@ typedef struct mtx ieee80211_ageq_lock_t;
 
 #define	IEEE80211_DEQUEUE(ifq, m) do {					\
 	(m) = (ifq)->ifq_drv_head;					\
-	if ((m)) {							\
+	if ((m) && ((m)->m_flags & M_TX_GO)) {				\
 		if (((ifq)->ifq_drv_head = (m)->m_nextpkt) == NULL)	\
 			(ifq)->ifq_drv_tail = NULL;			\
 		(m)->m_nextpkt = NULL;					\
 		(ifq)->ifq_drv_len--;					\
-	} else								\
+		break;							\
+	}								\
+	(m) = (ifq)->ifq_head;						\
+	if ((m) && ((m)->m_flags & M_TX_GO))				\
 		IFQ_DEQUEUE_NOLOCK(ifq, m);				\
+	else								\
+		(m) = NULL;						\
 } while (0)
 
 #define	IEEE80211_M_DOOM	0xff	/* token for freeing mbuf */
 #define	IEEE80211_M_DOOMED	(void *)IEEE80211_M_DOOM
 #define	IEEE80211_M_FREEM(m, n) do {					\
 	(m)->m_pkthdr.rcvif = IEEE80211_M_DOOMED;			\
+	(m)->m_flags |= M_TX_GO;	/* to get deququed */		\
 	if ((n) != NULL)						\
 		ieee80211_free_node((n));				\
 } while (0)
