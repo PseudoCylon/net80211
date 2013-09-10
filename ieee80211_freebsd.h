@@ -184,11 +184,9 @@ typedef struct mtx ieee80211_ageq_lock_t;
 
 #define	IEEE80211_M_DOOM	0xff	/* token for freeing mbuf */
 #define	IEEE80211_M_DOOMED	(void *)IEEE80211_M_DOOM
-#define	IEEE80211_M_FREEM(m, n) do {					\
+#define	IEEE80211_M_FREEM(m) do {					\
 	(m)->m_pkthdr.rcvif = IEEE80211_M_DOOMED;			\
 	(m)->m_flags |= M_TX_GO;	/* to get deququed */		\
-	if ((n) != NULL)						\
-		ieee80211_free_node((n));				\
 } while (0)
 
 /*
