@@ -433,9 +433,11 @@ ieee80211_transmit_pkt(struct ifnet *ifp, struct mbuf *m)
 int
 ieee80211_transmit(struct ifnet *ifp, struct mbuf *m)
 {
+	struct ieee80211vap *vap = ifp->if_softc;
+	struct ieee80211com *ic = vap->iv_ic;
 	int err;
 
-	IEEE80211_ENQUEUE(ifp, m, err);
+	IEEE80211_ENQUEUE(ic->ic_ifp, m, err);
 	if (err == 0)
 		err = ieee80211_transmit_pkt(ifp, m);
 
@@ -636,7 +638,7 @@ ieee80211_output(struct ifnet *ifp, struct mbuf *m,
 	if (ieee80211_classify(ni, m))
 		senderr(EIO);		/* XXX */
 
-	IEEE80211_MGT_ENQUEUE(ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	ifp->if_opackets++;
 	IEEE80211_NODE_STAT(ni, tx_data);
@@ -895,7 +897,7 @@ ieee80211_send_nulldata(struct ieee80211_node *ni)
 		return ENOMEM;
 	}
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);		/* NB: a little lie */
 	if (ni->ni_flags & IEEE80211_NODE_QOS) {
@@ -2086,7 +2088,7 @@ ieee80211_send_probereq(struct ieee80211_node *ni,
 		return ENOMEM;
 	}
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(ni, m,
@@ -2474,7 +2476,7 @@ ieee80211_send_mgmt(struct ieee80211_node *ni, int type, int arg)
 		/* NOTREACHED */
 	}
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	/* NB: force non-ProbeResp frames to the highest queue */
 	params.ibp_pri = WME_AC_VO;
@@ -2701,7 +2703,7 @@ ieee80211_send_proberesp(struct ieee80211vap *vap,
 	M_PREPEND(m, sizeof(struct ieee80211_frame), M_NOWAIT);
 	KASSERT(m != NULL, ("no room for header"));
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(bss, m,

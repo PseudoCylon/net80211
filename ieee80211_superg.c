@@ -503,7 +503,7 @@ ff_flush(struct mbuf *head, struct mbuf *last)
 		ni = (struct ieee80211_node *) m->m_pkthdr.rcvif;
 		vap = ni->ni_vap;
 
-		IEEE80211_ENQUEUE(vap->iv_ifp, m, err);
+		IEEE80211_ENQUEUE(ni->ni_ic->ic_ifp, m, err);
 		if (err != 0)
 			continue;
 
@@ -706,7 +706,7 @@ ieee80211_ff_check(struct ieee80211_node *ni, struct mbuf *m)
 			IEEE80211_NOTE(vap, IEEE80211_MSG_SUPERG, ni,
 			    "%s: flush staged frame", __func__);
 			/* encap and xmit */
-			IEEE80211_ENQUEUE(vap->iv_ifp, m, err);
+			IEEE80211_ENQUEUE(ic->ic_ifp, m, err);
 			if (err == 0)
 				ff_transmit(ni, mstaged);
 		}

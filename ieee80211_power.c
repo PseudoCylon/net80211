@@ -456,7 +456,7 @@ pwrsave_flushq(struct ieee80211_node *ni)
 	if (parent != NULL) {
 		while (parent_q != NULL) {
 			m = parent_q;
-			IEEE80211_ENQUEUE(vap->iv_ifp, m, err);
+			IEEE80211_ENQUEUE(ic->ic_ifp, m, err);
 			if (err !=0 )
 				continue;
 			parent_q = m->m_nextpkt;

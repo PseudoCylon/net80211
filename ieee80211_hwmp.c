@@ -656,7 +656,7 @@ hwmp_send_action(struct ieee80211vap *vap,
 		return ENOMEM;
 	}
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	ieee80211_send_setup(ni, m,
 	    IEEE80211_FC0_TYPE_MGT | IEEE80211_FC0_SUBTYPE_ACTION,

@@ -283,7 +283,7 @@ ieee80211_dwds_mcast(struct ieee80211vap *vap0, struct mbuf *m)
 
 		BPF_MTAP(ifp, m);		/* 802.3 tx */
 
-		IEEE80211_ENQUEUE(ifp, mcopy, err);
+		IEEE80211_ENQUEUE(ic->ic_ifp, mcopy, err);
 		if (err != 0)
 			continue;
 

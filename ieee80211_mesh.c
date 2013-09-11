@@ -1219,7 +1219,7 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 	KASSERT(mccopy->mc_ttl > 0, ("%s called with wrong ttl", __func__));
 	mccopy->mc_ttl--;
 
-	IEEE80211_ENQUEUE(ifp, mcopy, err);
+	IEEE80211_ENQUEUE(ic->ic_ifp, mcopy, err);
 	if (err != 0)
 		return;
 
@@ -2670,7 +2670,7 @@ mesh_send_action(struct ieee80211_node *ni,
 		return ENOMEM;
 	}
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ni->ni_ic->ic_ifp, m);
 
 	wh = mtod(m, struct ieee80211_frame *);
 	ieee80211_send_setup(ni, m,

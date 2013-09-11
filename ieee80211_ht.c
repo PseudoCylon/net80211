@@ -2352,7 +2352,7 @@ ieee80211_send_bar(struct ieee80211_node *ni,
 		/* NOTREACHED */
 	}
 
-	IEEE80211_MGT_ENQUEUE(vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ic->ic_ifp, m);
 
 	bar = mtod(m, struct ieee80211_frame_bar *);
 	bar->i_fc[0] = IEEE80211_FC0_VERSION_0 |
@@ -2424,7 +2424,7 @@ ht_action_output(struct ieee80211_node *ni, struct mbuf *m)
 {
 	struct ieee80211_bpf_params params;
 
-	IEEE80211_MGT_ENQUEUE(ni->ni_vap->iv_ifp, m);
+	IEEE80211_MGT_ENQUEUE(ni->ni_ic->ic_ifp, m);
 
 	memset(&params, 0, sizeof(params));
 	params.ibp_pri = WME_AC_VO;
