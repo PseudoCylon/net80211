@@ -251,7 +251,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 	}
 	ic->ic_lastdata = ticks;
 
-	return (0);
+	return (error);
 }
 
 /*
@@ -393,9 +393,8 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 	/*
 	 * We've resolved the sender, so attempt to transmit it.
 	 */
-	if (ieee80211_vap_pkt_send_dest(vap, m, ni) != 0)
-		return (ENOBUFS);
-	return (0);
+	return (ieee80211_vap_pkt_send_dest(vap, m, ni));
+
 #undef	IS_DWDS
 }
 
