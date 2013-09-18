@@ -86,6 +86,10 @@
 #define	IEEE80211_TU_TO_MS(x)	(((x) * 1024) / 1000)
 #define	IEEE80211_TU_TO_TICKS(x)(((x) * 1024 * hz) / (1000 * 1000))
 
+#define	IEEE80211_TXQ_MAX	16
+#define	IEEE80211_TXQ_MASK	(IEEE80211_TXQ_MAX - 1)
+#define	IEEE80211_TXQ_INC(c)	((c) = ((c) + 1) & IEEE80211_TXQ_MASK)
+
 /*
  * 802.11 control state is split into a common portion that maps
  * 1-1 to a physical device and one or more "Virtual AP's" (VAP)
@@ -108,6 +112,14 @@ struct ieee80211_appie {
 	uint8_t			ie_data[];	/* user-specified IE's */
 };
 
+struct ieee80211txq {
+	struct mbuf	*it_m[IEEE80211_TXQ_MAX];
+	uint16_t	it_head;
+	uint16_t	it_tail;
+	uint16_t	it_cnt;
+	uint16_t	it_pad;
+};
+
 struct ieee80211_tdma_param;
 struct ieee80211_rate_table;
 struct ieee80211_tx_ampdu;
@@ -117,6 +129,7 @@ struct ieee80211_frame;
 
 struct ieee80211com {
 	struct ifnet		*ic_ifp;	/* associated device */
+	struct ieee80211txq	ic_txq;
 	ieee80211_com_lock_t	ic_comlock;	/* state update lock */
 	TAILQ_HEAD(, ieee80211vap) ic_vaps;	/* list of vap instances */
 	int			ic_headroom;	/* driver tx headroom needs */

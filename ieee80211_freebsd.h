@@ -145,12 +145,19 @@ typedef struct mtx ieee80211_ageq_lock_t;
  * TODO fragment
  */
 #define IEEE80211_ENQUEUE(ifp, m, e) do {				\
-	IFQ_ENQUEUE(&(ifp)->if_snd, m, e);				\
-	if ((e) == 0) {							\
-		(ifp)->if_obytes += (m)->m_pkthdr.len;			\
-		if ((m)->m_flags & M_MCAST)				\
-			(ifp)->if_omcasts++;				\
+	struct ieee80211com *c = (ifp)->if_l2com;			\
+	struct ieee80211txq *q = &c->ic_txq;				\
+	IF_LOCK(&(ifp)->if_snd);					\
+	if (q->it_cnt >= IEEE80211_TXQ_MAX) {				\
+		(e) = ENOBUFS;						\
+		IF_UNLOCK(&(ifp)->if_snd);				\
+		break;							\
 	}								\
+	q->it_m[q->it_tail] = (m);					\
+	IEEE80211_TXQ_INC(q->it_tail);					\
+	q->it_cnt++;							\
+	(e) = 0;							\
+	IF_UNLOCK(&(ifp)->if_snd);					\
 } while (0)
 
 #define	IEEE80211_MGT_ENQUEUE(ifp, m) do {				\
@@ -166,27 +173,51 @@ typedef struct mtx ieee80211_ageq_lock_t;
 	IF_UNLOCK(ifq);							\
 } while (0)
 
-#define	IEEE80211_DEQUEUE(ifq, m) do {					\
-	(m) = (ifq)->ifq_drv_head;					\
+#ifdef	ALTQ
+/*TODO */
+#define	IEEE80211_DATA_DEQUEUE(ifp, m) do {				\
+}while (0)
+#endif
+
+#define	IEEE80211_DEQUEUE(ifp, m) do {					\
+	struct ifaltq *ifq = &(ifp)->if_snd;				\
+	struct ieee80211com *c = (ifp)->if_l2com;			\
+	struct ieee80211txq *q = &c->ic_txq;				\
+	(m) = ifq->ifq_drv_head;					\
 	if ((m) && ((m)->m_flags & M_TX_GO)) {				\
-		if (((ifq)->ifq_drv_head = (m)->m_nextpkt) == NULL)	\
-			(ifq)->ifq_drv_tail = NULL;			\
+		if ((ifq->ifq_drv_head = (m)->m_nextpkt) == NULL)	\
+			ifq->ifq_drv_tail = NULL;			\
 		(m)->m_nextpkt = NULL;					\
-		(ifq)->ifq_drv_len--;					\
+		ifq->ifq_drv_len--;					\
 		break;							\
 	}								\
-	(m) = (ifq)->ifq_head;						\
-	if ((m) && ((m)->m_flags & M_TX_GO))				\
-		IFQ_DEQUEUE_NOLOCK(ifq, m);				\
-	else								\
-		(m) = NULL;						\
+	for (; q->it_cnt > 0; IEEE80211_TXQ_INC(q->it_head)) {		\
+		(m) = *(q->it_m + q->it_head);				\
+		if ((m) == NULL)					\
+			continue;					\
+		if (!((m)->m_flags & M_TX_GO)) {			\
+			(m) = NULL;					\
+			break;						\
+		}							\
+		q->it_m[q->it_head] = NULL;				\
+		IEEE80211_TXQ_INC(q->it_head);				\
+		q->it_cnt--;						\
+		break;							\
+	}								\
 } while (0)
 
-#define	IEEE80211_M_DOOM	0xff	/* token for freeing mbuf */
-#define	IEEE80211_M_DOOMED	(void *)IEEE80211_M_DOOM
-#define	IEEE80211_M_FREEM(m) do {					\
-	(m)->m_pkthdr.rcvif = IEEE80211_M_DOOMED;			\
-	(m)->m_flags |= M_TX_GO;	/* to get deququed */		\
+#define	IEEE80211_M_UPDATE(ifp, m, n) do {				\
+	struct mbuf **mp;						\
+	struct ieee80211com *c = (ifp)->if_l2com;			\
+	struct ieee80211txq *q = &c->ic_txq;				\
+	if ((m) == (n))							\
+		break;							\
+	IF_LOCK(&(ifp)->if_snd);					\
+	for (mp = q->it_m; m != *mp; mp++);				\
+	*mp = (n);							\
+	if (n == NULL)							\
+		q->it_cnt--;						\
+	IF_UNLOCK(&(ifp)->if_snd);					\
 } while (0)
 
 /*

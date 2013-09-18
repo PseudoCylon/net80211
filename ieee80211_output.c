@@ -129,6 +129,7 @@ int
 ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
     struct ieee80211_node *ni)
 {
+	struct mbuf *n;
 	struct ieee80211com *ic = vap->iv_ic;
 	struct ifnet *ifp = vap->iv_ifp;
 	int error;
@@ -142,6 +143,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		 * XXX lose WDS vap linkage?
 		 */
 		(void) ieee80211_pwrsave(ni, m);
+		IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 		ieee80211_free_node(ni);
 		/* XXX better status? */
 		return (ENOBUFS);
@@ -154,6 +156,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		vap->iv_stats.is_tx_classify++;
 		ifp->if_oerrors++;
 		m_freem(m);
+		IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 		ieee80211_free_node(ni);
 		/* XXX better status? */
 		return (ENOBUFS);
@@ -207,8 +210,10 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 
 #ifdef IEEE80211_SUPPORT_SUPERG
 	else if (IEEE80211_ATH_CAP(vap, ni, IEEE80211_NODE_FF)) {
-		m = ieee80211_ff_check(ni, m);
-		if (m == NULL) {
+		n = ieee80211_ff_check(ni, m);
+		IEEE80211_M_UPDATE(ic->ic_ifp, m, n);
+		m = n;
+		if (n == NULL) {
 			/* NB: any ni ref held on stageq */
 			return (0);
 		}
@@ -219,14 +224,23 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		/*
 		 * Encapsulate the packet in prep for transmission.
 		 */
-		m = ieee80211_encap(vap, ni, m);
-		if (m == NULL) {
+		n = ieee80211_encap(vap, ni, m);
+		IEEE80211_M_UPDATE(ic->ic_ifp, m, n);
+		m = n;
+		if (n == NULL) {
 			/* NB: stat+msg handled in ieee80211_encap */
 			ieee80211_free_node(ni);
 			/* XXX better status? */
 			return (ENOBUFS);
 		}
 	}
+
+#ifdef	ALTQ
+	/*TODO */
+	IEEE80211_DATA_DEQUEUE(ic->ic_ifp, m);
+	IFQ_ENQUEUE(ic->ic_ifp->if_snd, m, error); 
+#endif
+
 	error = ieee80211_parent_transmit(ic, m);
 
 	if (error != 0) {
@@ -256,6 +270,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 #define	IS_DWDS(vap) \
 	(vap->iv_opmode == IEEE80211_M_WDS && \
 	 (vap->iv_flags_ext & IEEE80211_FEXT_WDSLEGACY) == 0)
+	struct mbuf *n = m;
 	struct ieee80211com *ic = vap->iv_ic;
 	struct ifnet *ifp = vap->iv_ifp;
 	struct ieee80211_node *ni;
@@ -274,8 +289,12 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 	 *     mbuf has the 802.3 header present (and contiguous).
 	 */
 	ni = NULL;
-	if (m->m_len < sizeof(struct ether_header) &&
-	   (m = m_pullup(m, sizeof(struct ether_header))) == NULL) {
+	if (m->m_len < sizeof(struct ether_header)) {
+		n = m_pullup(m, sizeof(struct ether_header));
+		IEEE80211_M_UPDATE(ic->ic_ifp, m, n);
+		m = n;
+	}
+	if (n == NULL) {
 		IEEE80211_DPRINTF(vap, IEEE80211_MSG_OUTPUT,
 		    "discard frame, %s\n", "m_pullup failed");
 		vap->iv_stats.is_tx_nobuf++;	/* XXX */
@@ -295,6 +314,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			    eh->ether_dhost, "mcast", "%s", "on DWDS");
 			vap->iv_stats.is_dwds_mcast++;
 			m_freem(m);
+			IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 			/* XXX better status? */
 			return (ENOBUFS);
 		}
@@ -314,6 +334,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			/* NB: ieee80211_find_txnode does stat+msg */
 			ifp->if_oerrors++;
 			m_freem(m);
+			IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 			/* XXX better status? */
 			return (ENOBUFS);
 		}
@@ -326,6 +347,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			vap->iv_stats.is_tx_notassoc++;
 			ifp->if_oerrors++;
 			m_freem(m);
+			IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 			ieee80211_free_node(ni);
 			/* XXX better status? */
 			return (ENOBUFS);
@@ -345,6 +367,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 				vap->iv_stats.is_mesh_notproxy++;
 				ifp->if_oerrors++;
 				m_freem(m);
+				IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 				/* XXX better status? */
 				return (ENOBUFS);
 			}
@@ -442,6 +465,31 @@ ieee80211_transmit(struct ifnet *ifp, struct mbuf *m)
 		err = ieee80211_transmit_pkt(ifp, m);
 
 	return (err);
+}
+
+void
+ieee80211_qflush(struct ifnet *ifp)
+{
+	struct mbuf *m, **mp;
+	struct ifaltq *ifq = &ifp->if_snd;
+	struct ieee80211com *ic = ifp->if_l2com;
+	struct ieee80211txq *txq = &ic->ic_txq;
+
+	IF_LOCK(ifq);
+
+	for (m = ifq->ifq_drv_head; m != NULL; m = m->m_nextpkt)
+		m_freem(m);
+
+	ifq->ifq_drv_head = ifq->ifq_drv_tail = NULL;
+	ifq->ifq_drv_len = ifq->ifq_drv_maxlen = 0;
+
+	/* TODO free node */
+	for (mp = txq->it_m; mp < txq->it_m + IEEE80211_TXQ_MAX; mp++)
+		m_freem(*mp);
+
+	memset(txq, 0, sizeof(*txq));
+
+	IF_UNLOCK(ifq);
 }
 
 /*

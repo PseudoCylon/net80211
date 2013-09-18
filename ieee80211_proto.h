@@ -111,6 +111,7 @@ void	ieee80211_send_setup(struct ieee80211_node *, struct mbuf *, int, int,
         const uint8_t [IEEE80211_ADDR_LEN], const uint8_t [IEEE80211_ADDR_LEN],
         const uint8_t [IEEE80211_ADDR_LEN]);
 int	ieee80211_transmit(struct ifnet *, struct mbuf *);
+void	ieee80211_qflush(struct ifnet *);
 void	ieee80211_start(struct ifnet *ifp);
 #define	IEEE80211_TRANSMIT_ENABLED(ifp)	\
 	(ifp)->if_transmit == ieee80211_transmit
