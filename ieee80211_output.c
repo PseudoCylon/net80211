@@ -241,14 +241,21 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 	IFQ_ENQUEUE(ic->ic_ifp->if_snd, m, error); 
 #endif
 
-	error = ieee80211_parent_transmit(ic, m);
+	for (; m != NULL; m = n) {
+		if (!(m->m_flags & M_FRAG) || m->m_flags & M_LASTFRAG)
+			m->m_nextpkt = NULL;
+		n = m->m_nextpkt;
+		error = ieee80211_parent_transmit(ic, m);
 
-	if (error != 0) {
-		/* NB: IFQ_HANDOFF reclaims mbuf */
-		ieee80211_free_node(ni);
-	} else {
+		if (__predict_false(error != 0)) {
+			/* NB: IFQ_HANDOFF reclaims mbuf */
+			ieee80211_free_node(ni);
+			break;
+		}
+
 		ifp->if_opackets++;
 	}
+
 	ic->ic_lastdata = ticks;
 
 	return (error);

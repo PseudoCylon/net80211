@@ -180,6 +180,7 @@ typedef struct mtx ieee80211_ageq_lock_t;
 #endif
 
 #define	IEEE80211_DEQUEUE(ifp, m) do {					\
+	struct mbuf *n;							\
 	struct ifaltq *ifq = &(ifp)->if_snd;				\
 	struct ieee80211com *c = (ifp)->if_l2com;			\
 	struct ieee80211txq *q = &c->ic_txq;				\
@@ -199,7 +200,20 @@ typedef struct mtx ieee80211_ageq_lock_t;
 			(m) = NULL;					\
 			break;						\
 		}							\
-		q->it_m[q->it_head] = NULL;				\
+		if (!((m)->m_flags & M_FRAG)) {				\
+			q->it_m[q->it_head] = NULL;			\
+			IEEE80211_TXQ_INC(q->it_head);			\
+			q->it_cnt--;					\
+			break;						\
+		}							\
+		for (n = (m); n->m_nextpkt != NULL; n = n->m_nextpkt);	\
+		if (!(n->m_flags & M_TX_GO)) {				\
+			(m) = NULL;					\
+			break;						\
+		}							\
+		q->it_m[q->it_head] = (m)->m_nextpkt;			\
+		if ((m)->m_nextpkt != NULL)				\
+			break;						\
 		IEEE80211_TXQ_INC(q->it_head);				\
 		q->it_cnt--;						\
 		break;							\
@@ -340,6 +354,30 @@ struct mbuf *ieee80211_getmgtframe(uint8_t **frm, int headroom, int pktlen);
 #define	IEEE80211_MBUF_RX_FLAG_BITS \
 	M_FLAG_BITS \
 	"\15M_AMPDU\16M_WEP\24M_AMPDU_MPDU"
+
+/*
+ * handle fragmented packets
+ */
+#define	M_FRAG_FREEM(m) do {					\
+	struct mbuf *n;						\
+	for (; (m) != NULL; (m) = n) {				\
+		n = (m)->m_nextpkt;				\
+		m_freem((m));					\
+	}							\
+} while (0)
+
+#define	M_FRAG_CNT(m, c) do {					\
+	struct mbuf *n;						\
+	(c) = 1;						\
+	if (!((m)->m_flags & M_FRAG))				\
+		break;						\
+	if (!((m)->m_flags & M_FIRSTFRAG)) {			\
+		(c) = 0;					\
+		break;						\
+	}							\
+	for (n = (m); n->m_nextpkt != NULL; n = n->m_nextpkt)	\
+		(c)++;						\
+} while (0)
 
 /*
  * Store WME access control bits in the vlan tag.
