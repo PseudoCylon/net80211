@@ -151,6 +151,7 @@ typedef struct mtx ieee80211_ageq_lock_t;
 	if (q->it_cnt >= IEEE80211_TXQ_MAX) {				\
 		(e) = ENOBUFS;						\
 		IF_UNLOCK(&(ifp)->if_snd);				\
+		M_FRAG_FREEM(m);					\
 		break;							\
 	}								\
 	q->it_m[q->it_tail] = (m);					\
