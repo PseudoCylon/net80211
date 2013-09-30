@@ -145,8 +145,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		(void) ieee80211_pwrsave(ni, m);
 		IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 		ieee80211_free_node(ni);
-		/* XXX better status? */
-		return (ENOBUFS);
+		return (0);
 	}
 	/* calculate priority so drivers can find the tx queue */
 	if (ieee80211_classify(ni, m)) {
@@ -158,8 +157,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		m_freem(m);
 		IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 		ieee80211_free_node(ni);
-		/* XXX better status? */
-		return (ENOBUFS);
+		return (ECONNREFUSED);
 	}
 	/*
 	 * Stash the node pointer.  Note that we do this after
@@ -230,8 +228,7 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		if (n == NULL) {
 			/* NB: stat+msg handled in ieee80211_encap */
 			ieee80211_free_node(ni);
-			/* XXX better status? */
-			return (ENOBUFS);
+			return (ENETUNREACH);
 		}
 	}
 
@@ -322,14 +319,12 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			vap->iv_stats.is_dwds_mcast++;
 			m_freem(m);
 			IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
-			/* XXX better status? */
-			return (ENOBUFS);
+			return (ECONNREFUSED);
 		}
 		if (vap->iv_opmode == IEEE80211_M_HOSTAP) {
 			/*
 			 * Spam DWDS vap's w/ multicast traffic.
 			 */
-			/* XXX only if dwds in use? */
 			ieee80211_dwds_mcast(vap, m);
 		}
 	}
@@ -342,8 +337,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			ifp->if_oerrors++;
 			m_freem(m);
 			IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
-			/* XXX better status? */
-			return (ENOBUFS);
+			return (ENETUNREACH);
 		}
 		if (ni->ni_associd == 0 &&
 		    (ni->ni_flags & IEEE80211_NODE_ASSOCID)) {
@@ -356,8 +350,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			m_freem(m);
 			IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 			ieee80211_free_node(ni);
-			/* XXX better status? */
-			return (ENOBUFS);
+			return (ENETUNREACH);
 		}
 #ifdef IEEE80211_SUPPORT_MESH
 	} else {
@@ -375,8 +368,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 				ifp->if_oerrors++;
 				m_freem(m);
 				IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
-				/* XXX better status? */
-				return (ENOBUFS);
+				return (ECONNREFUSED);
 			}
 			IEEE80211_DPRINTF(vap, IEEE80211_MSG_OUTPUT,
 			    "forward frame from DS SA(%6D), DA(%6D)\n",
@@ -391,8 +383,7 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 			 * frame (e.g. queueing on path discovery).
 			 */
 			ifp->if_oerrors++;
-			/* XXX better status? */
-			return (ENOBUFS);
+			return (ECONNREFUSED);
 		}
 	}
 #endif
