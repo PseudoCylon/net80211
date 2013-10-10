@@ -1529,6 +1529,25 @@ htcap_update_shortgi(struct ieee80211_node *ni)
 }
 
 /*
+ * Update protection mode
+ */
+static __inline int
+htcap_update_prot(struct ieee80211_node *ni)
+{
+	struct ieee80211com *ic = ni->ni_ic;
+	uint8_t mode = ic->ic_curhtprotmode;
+
+	if (ic->ic_opmode == IEEE80211_M_WDS ||
+	    ic->ic_opmode == IEEE80211_M_HOSTAP ||
+	    ic->ic_opmode == IEEE80211_M_MBSS)
+		return (0);
+
+	ic->ic_curhtprotmode = ni->ni_htopmode;
+
+	return (mode != ni->ni_htopmode);
+}
+
+/*
  * Parse and update HT-related state extracted from
  * the HT cap and info ie's.
  */
@@ -1561,7 +1580,7 @@ ieee80211_ht_updateparams(struct ieee80211_node *ni,
 		else if (ni->ni_ht2ndchan == IEEE80211_HTINFO_2NDCHAN_BELOW)
 			htflags = IEEE80211_CHAN_HT40D;
 	}
-	if (htinfo_update_chw(ni, htflags))
+	if (htinfo_update_chw(ni, htflags) || htcap_update_prot(ni))
 		ret = 1;
 
 	if ((htinfo->hi_byte1 & IEEE80211_HTINFO_RIFSMODE_PERM) &&

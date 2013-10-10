@@ -1449,8 +1449,11 @@ sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 			 * If we've had a channel width change (eg HT20<->HT40)
 			 * then schedule a delayed driver notification.
 			 */
-			if (ht_state_change)
+			if (ht_state_change) {
 				ieee80211_update_chw(ic);
+				if (ic->ic_updateprot != NULL)
+					ic->ic_updateprot(ic);
+			}
 			return;
 		}
 		/*
@@ -1637,6 +1640,9 @@ sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 			ieee80211_setup_basic_htrates(ni, htinfo);
 			ieee80211_node_setuptxparms(ni);
 			ieee80211_ratectl_node_init(ni);
+
+			/* obeys AP for now */
+			ic->ic_curhtprotmode = ni->ni_htopmode;
 		} else {
 #ifdef IEEE80211_SUPPORT_SUPERG
 			if (IEEE80211_ATH_CAP(vap, ni, IEEE80211_NODE_ATH))
@@ -1690,6 +1696,8 @@ sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 			", turbo" : ""
 		);
 		ieee80211_new_state(vap, IEEE80211_S_RUN, subtype);
+		if (ic->ic_updateprot != NULL)
+			ic->ic_updateprot(ic);
 		break;
 	}
 

@@ -267,6 +267,8 @@ struct ieee80211com {
 	int			(*ic_raw_xmit)(struct ieee80211_node *,
 				    struct mbuf *,
 				    const struct ieee80211_bpf_params *);
+	/* update device state for ht protection mode change */
+	void			(*ic_updateprot)(struct ieee80211com *);
 	/* update device state for 802.11 slot time change */
 	void			(*ic_updateslot)(struct ifnet *);
 	/* handle multicast state changes */

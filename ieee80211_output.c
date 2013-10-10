@@ -461,6 +461,9 @@ ieee80211_transmit(struct ifnet *ifp, struct mbuf *m)
 	if (err == 0)
 		err = ieee80211_transmit_pkt(ifp, m);
 
+	/* do not return ENOBUFS for now */
+	err = err == ENOBUFS ? 0 : err;
+
 	return (err);
 }
 
