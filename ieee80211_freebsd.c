@@ -797,8 +797,9 @@ static eventhandler_tag wlan_ifllevent;
 static void
 bpf_track(void *arg, struct ifnet *ifp, int dlt, int attach)
 {
-	/* NB: identify vap's by if_start */
-	if (dlt == DLT_IEEE802_11_RADIO && ifp->if_start == ieee80211_start) {
+	/* NB: identify vap's by if_init */
+	if (dlt == DLT_IEEE802_11_RADIO &&
+	    ifp->if_init == ieee80211_init) {
 		struct ieee80211vap *vap = ifp->if_softc;
 		/*
 		 * Track bpf radiotap listener state.  We mark the vap
