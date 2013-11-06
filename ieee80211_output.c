@@ -146,6 +146,11 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 		(void) ieee80211_pwrsave(ni, m);
 		IEEE80211_M_UPDATE(ic->ic_ifp, m, NULL);
 		ieee80211_free_node(ni);
+
+		/*
+		 * We queued it fine, so tell the upper layer
+		 * that we consumed it.
+		 */
 		return (0);
 	}
 	/* calculate priority so drivers can find the tx queue */
@@ -169,7 +174,6 @@ ieee80211_vap_pkt_send_dest(struct ieee80211vap *vap, struct mbuf *m,
 	m->m_pkthdr.rcvif = (void *)ni;
 
 	BPF_MTAP(ifp, m);		/* 802.3 tx */
-
 
 	/*
 	 * Check if A-MPDU tx aggregation is setup or if we
