@@ -1375,9 +1375,8 @@ sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 			if (scan.htcap != NULL && scan.htinfo != NULL &&
 			    (vap->iv_flags_ht & IEEE80211_FHT_HT)) {
 				/* XXX state changes? */
-				if (ieee80211_ht_updateparams(ni,
-				    scan.htcap, scan.htinfo))
-					ht_state_change = 1;
+				ht_state_change = ieee80211_ht_updateparams(ni,
+				    scan.htcap, scan.htinfo);
 			}
 			if (scan.quiet)
 				ic->ic_set_quiet(ni, scan.quiet);
@@ -1449,8 +1448,9 @@ sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 			 * If we've had a channel width change (eg HT20<->HT40)
 			 * then schedule a delayed driver notification.
 			 */
-			if (ht_state_change) {
+			if (ht_state_change & IEEE80211_HTINFO_UPDATE_CHW)
 				ieee80211_update_chw(ic);
+			if (ht_state_change & IEEE80211_HTINFO_UPDATE_PROT) {
 				if (ic->ic_updateprot != NULL)
 					ic->ic_updateprot(ic);
 			}

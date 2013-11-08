@@ -1581,8 +1581,10 @@ ieee80211_ht_updateparams(struct ieee80211_node *ni,
 		else if (ni->ni_ht2ndchan == IEEE80211_HTINFO_2NDCHAN_BELOW)
 			htflags = IEEE80211_CHAN_HT40D;
 	}
-	if (htinfo_update_chw(ni, htflags) || htcap_update_prot(ni))
-		ret = 1;
+	if (htinfo_update_chw(ni, htflags))
+		ret |= IEEE80211_HTINFO_UPDATE_CHW;
+	if (htcap_update_prot(ni))
+		ret |= IEEE80211_HTINFO_UPDATE_PROT;
 
 	if ((htinfo->hi_byte1 & IEEE80211_HTINFO_RIFSMODE_PERM) &&
 	    (vap->iv_flags_ht & IEEE80211_FHT_RIFS))

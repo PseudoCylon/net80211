@@ -684,6 +684,9 @@ struct ieee80211_ie_htinfo {
 #define	IEEE80211_HTINFO_BASIC_STBCMCS_S 0
 #define	IEEE80211_HTINFO_DUALPROTECTED	0x80
 
+#define	IEEE80211_HTINFO_UPDATE_CHW	(1 << 0)
+#define	IEEE80211_HTINFO_UPDATE_PROT	(1 << 1)
+
 /*
  * Management information element payloads.
  */
