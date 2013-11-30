@@ -330,8 +330,7 @@ int
 ieee80211_node_dectestref(struct ieee80211_node *ni)
 {
 	/* XXX need equivalent of atomic_dec_and_test */
-	atomic_subtract_int(&ni->ni_refcnt, 1);
-	return atomic_cmpset_int(&ni->ni_refcnt, 0, 1);
+	return (atomic_fetchadd_int(&ni->ni_refcnt, -1) == 1 ? 1 : 0);
 }
 
 void

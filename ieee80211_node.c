@@ -91,8 +91,6 @@ static void node_getsignal(const struct ieee80211_node *, int8_t *, int8_t *);
 static void node_getmimoinfo(const struct ieee80211_node *,
 	struct ieee80211_mimo_info *);
 
-static void _ieee80211_free_node(struct ieee80211_node *);
-
 static void ieee80211_node_table_init(struct ieee80211com *ic,
 	struct ieee80211_node_table *nt, const char *name,
 	int inact, int keymaxix);
@@ -1720,35 +1718,6 @@ ieee80211_find_txnode(struct ieee80211vap *vap,
 	return ni;
 }
 
-static void
-_ieee80211_free_node(struct ieee80211_node *ni)
-{
-	struct ieee80211_node_table *nt = ni->ni_table;
-
-	/*
-	 * NB: careful about referencing the vap as it may be
-	 * gone if the last reference was held by a driver.
-	 * We know the com will always be present so it's safe
-	 * to use ni_ic below to reclaim resources.
-	 */
-#if 0
-	IEEE80211_DPRINTF(vap, IEEE80211_MSG_NODE,
-		"%s %p<%s> in %s table\n", __func__, ni,
-		ether_sprintf(ni->ni_macaddr),
-		nt != NULL ? nt->nt_name : "<gone>");
-#endif
-	if (ni->ni_associd != 0) {
-		struct ieee80211vap *vap = ni->ni_vap;
-		if (vap->iv_aid_bitmap != NULL)
-			IEEE80211_AID_CLR(vap, ni->ni_associd);
-	}
-	if (nt != NULL) {
-		TAILQ_REMOVE(&nt->nt_node, ni, ni_list);
-		LIST_REMOVE(ni, ni_hash);
-	}
-	ni->ni_ic->ic_node_free(ni);
-}
-
 void
 #ifdef IEEE80211_DEBUG_REFCNT
 ieee80211_free_node_debug(struct ieee80211_node *ni, const char *func, int line)
@@ -1763,36 +1732,23 @@ ieee80211_free_node(struct ieee80211_node *ni)
 		"%s (%s:%u) %p<%s> refcnt %d\n", __func__, func, line, ni,
 		 ether_sprintf(ni->ni_macaddr), ieee80211_node_refcnt(ni)-1);
 #endif
+	if (atomic_fetchadd_int(&ni->ni_refcnt, -1) > 1)
+		return;
+
 	if (nt != NULL) {
 		IEEE80211_NODE_LOCK(nt);
-		if (ieee80211_node_dectestref(ni)) {
-			/*
-			 * Last reference, reclaim state.
-			 */
-			_ieee80211_free_node(ni);
-		} else if (ieee80211_node_refcnt(ni) == 1 &&
-		    nt->nt_keyixmap != NULL) {
-			ieee80211_keyix keyix;
-			/*
-			 * Check for a last reference in the key mapping table.
-			 */
-			keyix = ni->ni_ucastkey.wk_rxkeyix;
-			if (keyix < nt->nt_keyixmax &&
-			    nt->nt_keyixmap[keyix] == ni) {
-				IEEE80211_DPRINTF(ni->ni_vap,
-				    IEEE80211_MSG_NODE,
-				    "%s: %p<%s> clear key map entry", __func__,
-				    ni, ether_sprintf(ni->ni_macaddr));
-				nt->nt_keyixmap[keyix] = NULL;
-				ieee80211_node_decref(ni); /* XXX needed? */
-				_ieee80211_free_node(ni);
-			}
-		}
+		TAILQ_REMOVE(&nt->nt_node, ni, ni_list);
+		LIST_REMOVE(ni, ni_hash);
 		IEEE80211_NODE_UNLOCK(nt);
-	} else {
-		if (ieee80211_node_dectestref(ni))
-			_ieee80211_free_node(ni);
 	}
+
+	if (ni->ni_associd != 0) {
+		struct ieee80211vap *vap = ni->ni_vap;
+		if (vap->iv_aid_bitmap != NULL)
+			IEEE80211_AID_CLR(vap, ni->ni_associd);
+	}
+
+	ni->ni_ic->ic_node_free(ni);
 }
 
 /*
@@ -1805,23 +1761,15 @@ ieee80211_node_delucastkey(struct ieee80211_node *ni)
 	struct ieee80211_node_table *nt = &ic->ic_sta;
 	struct ieee80211_node *nikey;
 	ieee80211_keyix keyix;
-	int isowned, status;
+	int status;
 
 	/*
 	 * NB: We must beware of LOR here; deleting the key
 	 * can cause the crypto layer to block traffic updates
 	 * which can generate a LOR against the node table lock;
 	 * grab it here and stash the key index for our use below.
-	 *
-	 * Must also beware of recursion on the node table lock.
-	 * When called from node_cleanup we may already have
-	 * the node table lock held.  Unfortunately there's no
-	 * way to separate out this path so we must do this
-	 * conditionally.
 	 */
-	isowned = IEEE80211_NODE_IS_LOCKED(nt);
-	if (!isowned)
-		IEEE80211_NODE_LOCK(nt);
+	IEEE80211_NODE_LOCK(nt);
 	nikey = NULL;
 	status = 1;		/* NB: success */
 	if (ni->ni_ucastkey.wk_keyix != IEEE80211_KEYIX_NONE) {
@@ -1832,8 +1780,7 @@ ieee80211_node_delucastkey(struct ieee80211_node *ni)
 			nt->nt_keyixmap[keyix] = NULL;
 		}
 	}
-	if (!isowned)
-		IEEE80211_NODE_UNLOCK(nt);
+	IEEE80211_NODE_UNLOCK(nt);
 
 	if (nikey != NULL) {
 		KASSERT(nikey == ni,
@@ -1845,52 +1792,6 @@ ieee80211_node_delucastkey(struct ieee80211_node *ni)
 		ieee80211_free_node(ni);
 	}
 	return status;
-}
-
-/*
- * Reclaim a node.  If this is the last reference count then
- * do the normal free work.  Otherwise remove it from the node
- * table and mark it gone by clearing the back-reference.
- */
-static void
-node_reclaim(struct ieee80211_node_table *nt, struct ieee80211_node *ni)
-{
-	ieee80211_keyix keyix;
-
-	IEEE80211_NODE_LOCK_ASSERT(nt);
-
-	IEEE80211_DPRINTF(ni->ni_vap, IEEE80211_MSG_NODE,
-		"%s: remove %p<%s> from %s table, refcnt %d\n",
-		__func__, ni, ether_sprintf(ni->ni_macaddr),
-		nt->nt_name, ieee80211_node_refcnt(ni)-1);
-	/*
-	 * Clear any entry in the unicast key mapping table.
-	 * We need to do it here so rx lookups don't find it
-	 * in the mapping table even if it's not in the hash
-	 * table.  We cannot depend on the mapping table entry
-	 * being cleared because the node may not be free'd.
-	 */
-	keyix = ni->ni_ucastkey.wk_rxkeyix;
-	if (nt->nt_keyixmap != NULL && keyix < nt->nt_keyixmax &&
-	    nt->nt_keyixmap[keyix] == ni) {
-		IEEE80211_DPRINTF(ni->ni_vap, IEEE80211_MSG_NODE,
-			"%s: %p<%s> clear key map entry %u\n",
-			__func__, ni, ether_sprintf(ni->ni_macaddr), keyix);
-		nt->nt_keyixmap[keyix] = NULL;
-		ieee80211_node_decref(ni);	/* NB: don't need free */
-	}
-	if (!ieee80211_node_dectestref(ni)) {
-		/*
-		 * Other references are present, just remove the
-		 * node from the table so it cannot be found.  When
-		 * the references are dropped storage will be
-		 * reclaimed.
-		 */
-		TAILQ_REMOVE(&nt->nt_node, ni, ni_list);
-		LIST_REMOVE(ni, ni_hash);
-		ni->ni_table = NULL;		/* clear reference */
-	} else
-		_ieee80211_free_node(ni);
 }
 
 /*
@@ -1929,24 +1830,47 @@ ieee80211_node_table_reset(struct ieee80211_node_table *nt,
 	struct ieee80211vap *match)
 {
 	struct ieee80211_node *ni, *next;
+	ieee80211_keyix keyix;
+	TAILQ_HEAD(, ieee80211_node) node_list;
+
+	if (match == NULL)
+		return;
 
 	IEEE80211_NODE_LOCK(nt);
+	TAILQ_INIT(&node_list);
 	TAILQ_FOREACH_SAFE(ni, &nt->nt_node, ni_list, next) {
-		if (match != NULL && ni->ni_vap != match)
+		if (ni->ni_vap != match)
 			continue;
-		/* XXX can this happen?  if so need's work */
-		if (ni->ni_associd != 0) {
-			struct ieee80211vap *vap = ni->ni_vap;
 
-			if (vap->iv_auth->ia_node_leave != NULL)
-				vap->iv_auth->ia_node_leave(ni);
-			if (vap->iv_aid_bitmap != NULL)
-				IEEE80211_AID_CLR(vap, ni->ni_associd);
+		TAILQ_REMOVE(&nt->nt_node, ni, ni_list);
+		LIST_REMOVE(ni, ni_hash);
+		TAILQ_INSERT_TAIL(&node_list, ieee80211_ref_node(ni), ni_list);
+		ni->ni_table = NULL;		/* clear reference */
+
+		keyix = ni->ni_ucastkey.wk_rxkeyix;
+		if (keyix < nt->nt_keyixmax && nt->nt_keyixmap[keyix] == ni) {
+			IEEE80211_DPRINTF(ni->ni_vap, IEEE80211_MSG_NODE,
+			    "%s: %p<%s> clear key map entry", __func__,
+			    ni, ether_sprintf(ni->ni_macaddr));
+			nt->nt_keyixmap[keyix] = NULL;
+			ieee80211_node_decref(ni);
 		}
-		ni->ni_wdsvap = NULL;		/* clear reference */
-		node_reclaim(nt, ni);
 	}
-	if (match != NULL && match->iv_opmode == IEEE80211_M_WDS) {
+	IEEE80211_NODE_UNLOCK(nt);
+
+	TAILQ_FOREACH(ni, &node_list, ni_list) {
+
+		/* XXX can this happen?  if so need's work */
+		if (ni->ni_associd != 0 && match->iv_auth->ia_node_leave != NULL)
+			match->iv_auth->ia_node_leave(ni);
+
+		ni->ni_wdsvap = NULL;		/* clear reference */
+
+		ieee80211_node_decref(ni);	/* for node_list */
+		ieee80211_free_node(ni);	/* free node */
+	}
+
+	if (match->iv_opmode == IEEE80211_M_WDS) {
 		/*
 		 * Make a separate pass to clear references to this vap
 		 * held by DWDS entries.  They will not be matched above
@@ -1954,11 +1878,12 @@ ieee80211_node_table_reset(struct ieee80211_node_table *nt,
 		 * need to clear ni_wdsvap when the WDS vap is destroyed
 		 * and/or reset.
 		 */
-		TAILQ_FOREACH_SAFE(ni, &nt->nt_node, ni_list, next)
+		IEEE80211_NODE_LOCK(nt);
+		TAILQ_FOREACH(ni, &nt->nt_node, ni_list)
 			if (ni->ni_wdsvap == match)
 				ni->ni_wdsvap = NULL;
+		IEEE80211_NODE_UNLOCK(nt);
 	}
-	IEEE80211_NODE_UNLOCK(nt);
 }
 
 static void
@@ -1994,15 +1919,16 @@ ieee80211_node_table_cleanup(struct ieee80211_node_table *nt)
 static void
 ieee80211_timeout_stations(struct ieee80211com *ic)
 {
+	struct ieee80211_node *send_null[16], *node_leave[16];
 	struct ieee80211_node_table *nt = &ic->ic_sta;
 	struct ieee80211vap *vap;
 	struct ieee80211_node *ni;
-	int gen = 0;
+	int i, j, k, retry;
+	int gen = ++nt->nt_scangen;
 
-	IEEE80211_NODE_ITERATE_LOCK(nt);
-	gen = ++nt->nt_scangen;
 restart:
 	IEEE80211_NODE_LOCK(nt);
+	i = j = retry = 0;
 	TAILQ_FOREACH(ni, &nt->nt_node, ni_list) {
 		if (ni->ni_scangen == gen)	/* previously handled */
 			continue;
@@ -2086,11 +2012,13 @@ restart:
 				 * understands we've done this and reclaims the
 				 * ref for us as needed.
 				 */
-				ieee80211_ref_node(ni);
-				IEEE80211_NODE_UNLOCK(nt);
-				ieee80211_send_nulldata(ni);
+				send_null[i] = ieee80211_ref_node(ni);
+				if (++i == 16) {
+					retry = 1;
+					break;
+				}
 				/* XXX stat? */
-				goto restart;
+				continue;
 			}
 		}
 		if ((vap->iv_flags_ext & IEEE80211_FEXT_INACT) &&
@@ -2114,22 +2042,36 @@ restart:
 			 * in case the driver takes a lock, as this can result
 			 * in a LOR between the node lock and the driver lock.
 			 */
-			ieee80211_ref_node(ni);
-			IEEE80211_NODE_UNLOCK(nt);
-			if (ni->ni_associd != 0) {
-				IEEE80211_SEND_MGMT(ni,
-				    IEEE80211_FC0_SUBTYPE_DEAUTH,
-				    IEEE80211_REASON_AUTH_EXPIRE);
+			node_leave[j] = ieee80211_ref_node(ni);
+			if (++j == 16) {
+				retry = 1;
+				break;
 			}
-			ieee80211_node_leave(ni);
-			ieee80211_free_node(ni);
-			vap->iv_stats.is_node_timeout++;
-			goto restart;
 		}
 	}
 	IEEE80211_NODE_UNLOCK(nt);
 
-	IEEE80211_NODE_ITERATE_UNLOCK(nt);
+	for (k = 0; k < i; k++)
+		ieee80211_send_nulldata(send_null[k]);
+
+	for (k = 0; k < j; k++) {
+		ni = node_leave[k];
+		if (ni->ni_associd != 0) {
+			IEEE80211_SEND_MGMT(ni,
+			    IEEE80211_FC0_SUBTYPE_DEAUTH,
+			    IEEE80211_REASON_AUTH_EXPIRE);
+		}
+
+		ieee80211_node_leave(ni);
+		ieee80211_free_node(ni);
+		ni->ni_vap->iv_stats.is_node_timeout++;
+	}
+
+	if (retry) {
+		IEEE80211_DPRINTF(ni->ni_vap, IEEE80211_MSG_NODE,
+		    "%s\n", "retrying");
+		goto restart;
+	}
 }
 
 /*
@@ -2170,10 +2112,8 @@ ieee80211_drain(struct ieee80211com *ic)
 		 * Free fragments.
 		 * XXX doesn't belong here, move to node_drain
 		 */
-		if (ni->ni_rxfrag[0] != NULL) {
-			m_freem(ni->ni_rxfrag[0]);
-			ni->ni_rxfrag[0] = NULL;
-		}
+		m_freem((struct mbuf *)atomic_readandclear_long(
+		    (u_long *)ni->ni_rxfrag));
 		/*
 		 * Drain resources held by the station.
 		 */
@@ -2230,23 +2170,11 @@ int
 ieee80211_iterate_nt(struct ieee80211_node_table *nt,
     struct ieee80211_node **ni_arr, uint16_t max_aid)
 {
-	u_int gen;
 	int i, j, ret;
 	struct ieee80211_node *ni;
 
-	IEEE80211_NODE_ITERATE_LOCK(nt);
 	IEEE80211_NODE_LOCK(nt);
-
-	gen = ++nt->nt_scangen;
 	i = ret = 0;
-
-	/*
-	 * We simply assume here that since the node
-	 * scan generation doesn't change (as
-	 * we are holding both the node table and
-	 * node table iteration locks), we can simply
-	 * assign it to the node here.
-	 */
 	TAILQ_FOREACH(ni, &nt->nt_node, ni_list) {
 		if (i >= max_aid) {
 			ret = E2BIG;
@@ -2255,7 +2183,6 @@ ieee80211_iterate_nt(struct ieee80211_node_table *nt,
 			break;
 		}
 		ni_arr[i] = ieee80211_ref_node(ni);
-		ni_arr[i]->ni_scangen = gen;
 		i++;
 	}
 
@@ -2270,7 +2197,6 @@ ieee80211_iterate_nt(struct ieee80211_node_table *nt,
 	 * ieee80211_free_node().
 	 */
 	IEEE80211_NODE_UNLOCK(nt);
-	IEEE80211_NODE_ITERATE_UNLOCK(nt);
 
 	/*
 	 * If ret is non-zero, we hit some kind of error.
@@ -2664,6 +2590,7 @@ ieee80211_node_leave(struct ieee80211_node *ni)
 	/* XXX ibss mode bypasses 11g and notification */
 	if (ni->ni_associd == 0)
 		goto done;
+
 	/*
 	 * Tell the authenticator the station is leaving.
 	 * Note that we must do this before yanking the
@@ -2701,10 +2628,21 @@ done:
 	 */
 	if (nt != NULL) {
 		IEEE80211_NODE_LOCK(nt);
-		node_reclaim(nt, ni);
+		ieee80211_keyix keyix = ni->ni_ucastkey.wk_rxkeyix;
+		if (keyix < nt->nt_keyixmax && nt->nt_keyixmap[keyix] == ni) {
+			IEEE80211_DPRINTF(vap, IEEE80211_MSG_NODE,
+			    "%s: %p<%s> clear key map entry", __func__,
+			    ni, ether_sprintf(ni->ni_macaddr));
+			nt->nt_keyixmap[keyix] = NULL;
+			ieee80211_node_decref(ni);	/* NB: don't need free */
+		}
+		TAILQ_REMOVE(&nt->nt_node, ni, ni_list);
+		LIST_REMOVE(ni, ni_hash);
+		ni->ni_table = NULL;		/* clear reference */
 		IEEE80211_NODE_UNLOCK(nt);
-	} else
-		ieee80211_free_node(ni);
+	}
+
+	ieee80211_free_node(ni);
 }
 
 struct rssiinfo {
