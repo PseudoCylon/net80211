@@ -396,8 +396,20 @@ ieee80211_start_pkt(struct ieee80211vap *vap, struct mbuf *m)
 	/*
 	 * We've resolved the sender, so attempt to transmit it.
 	 */
-	return (ieee80211_vap_pkt_send_dest(vap, m, ni));
 
+	if (vap->iv_state == IEEE80211_S_SLEEP) {
+		/*
+		 * In power save; queue frame and then  wakeup device
+		 * for transmit.
+		 */
+		ic->ic_lastdata = ticks;
+		(void) ieee80211_pwrsave(ni, m);
+		ieee80211_free_node(ni);
+		ieee80211_new_state(vap, IEEE80211_S_RUN, 0);
+		return (0);
+	}
+
+	return (ieee80211_vap_pkt_send_dest(vap, m, ni));
 #undef	IS_DWDS
 }
 
@@ -420,23 +432,19 @@ ieee80211_transmit_pkt(struct ifnet *ifp, struct mbuf *m)
 		/* XXX stat */
 		return (ENXIO);
 	}
-	if (vap->iv_state == IEEE80211_S_SLEEP) {
-		/*
-		 * In power save, wakeup device for transmit.
-		 */
-		ieee80211_new_state(vap, IEEE80211_S_RUN, 0);
-		return (ENXIO);
-	}
+
 	/*
 	 * No data frames go out unless we're running.
 	 * Note in particular this covers CAC and CSA
 	 * states (though maybe we should check muting
 	 * for CSA).
 	 */
-	if (vap->iv_state != IEEE80211_S_RUN) {
+	if (vap->iv_state != IEEE80211_S_RUN &&
+	    vap->iv_state != IEEE80211_S_SLEEP) {
 		IEEE80211_LOCK(ic);
 		/* re-check under the com lock to avoid races */
-		if (vap->iv_state != IEEE80211_S_RUN) {
+		if (vap->iv_state != IEEE80211_S_RUN &&
+		    vap->iv_state != IEEE80211_S_SLEEP) {
 			IEEE80211_DPRINTF(vap, IEEE80211_MSG_OUTPUT,
 			    "%s: ignore queue, in %s state\n",
 			    __func__, ieee80211_state_name[vap->iv_state]);
@@ -572,6 +580,13 @@ ieee80211_start(struct ifnet *ifp)
 
 /*
  * 802.11 raw output routine.
+ *
+ * XXX TODO: this (and other send routines) should correctly
+ * XXX keep the pwr mgmt bit set if it decides to call into the
+ * XXX driver to send a frame whilst the state is SLEEP.
+ *
+ * Otherwise the peer may decide that we're awake and flood us
+ * with traffic we are still too asleep to receive!
  */
 int
 ieee80211_raw_output(struct ieee80211vap *vap, struct ieee80211_node *ni,
