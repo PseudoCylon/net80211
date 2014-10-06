@@ -1045,7 +1045,7 @@ mesh_transmit_to_gate(struct ieee80211vap *vap, struct mbuf *m,
 
 	ni = ieee80211_mesh_find_txnode(vap, rt_gate->rt_dest);
 	if (ni == NULL) {
-		ifp->if_oerrors++;
+		if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 		m_freem(m);
 		return;
 	}
@@ -1176,7 +1176,7 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 		IEEE80211_NOTE_FRAME(vap, IEEE80211_MSG_MESH, wh,
 		    "%s", "frame not fwd'd, cannot dup");
 		vap->iv_stats.is_mesh_fwd_nobuf++;
-		ifp->if_oerrors++;
+		if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 		return;
 	}
 	mcopy = m_pullup(mcopy, ieee80211_hdrspace(ic, wh) +
@@ -1185,7 +1185,7 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 		IEEE80211_NOTE_FRAME(vap, IEEE80211_MSG_MESH, wh,
 		    "%s", "frame not fwd'd, too short");
 		vap->iv_stats.is_mesh_fwd_tooshort++;
-		ifp->if_oerrors++;
+		if_inc_counter(ifp, IFCOUNTER_OERRORS, 1);
 		m_freem(mcopy);
 		return;
 	}
@@ -1235,7 +1235,7 @@ mesh_forward(struct ieee80211vap *vap, struct mbuf *m,
 		/* NB: IFQ_HANDOFF reclaims mbuf */
 		ieee80211_free_node(ni);
 	} else {
-		ifp->if_opackets++;
+		if_inc_counter(ifp, IFCOUNTER_OPACKETS, 1);
 	}
 }
 
@@ -1817,7 +1817,7 @@ mesh_input(struct ieee80211_node *ni, struct mbuf *m, int rssi, int nf)
 		break;
 	}
 err:
-	ifp->if_ierrors++;
+	if_inc_counter(ifp, IFCOUNTER_IERRORS, 1);
 out:
 	if (m != NULL) {
 		if (need_tap && ieee80211_radiotap_active_vap(vap))
@@ -3305,8 +3305,9 @@ mesh_airtime_calc(struct ieee80211_node *ni)
 	    ifp->if_mtu + IEEE80211_MESH_MAXOVERHEAD, rate, 0) << M_BITS;
 	/* Error rate in percentage */
 	/* XXX assuming small failures are ok */
-	errrate = (((ifp->if_oerrors +
-	    ifp->if_ierrors) / 100) << M_BITS) / 100;
+	errrate = (((ifp->if_get_counter(ifp, IFCOUNTER_OERRORS) +
+	    ifp->if_get_counter(ifp, IFCOUNTER_IERRORS)) / 100) << M_BITS)
+	    / 100;
 	res = (overhead + (nbits / rate)) *
 	    ((1 << S_FACTOR) / ((1 << M_BITS) - errrate));
 
